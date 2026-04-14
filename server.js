@@ -3,8 +3,17 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const cors = require('cors');
+const multer = require('multer');
+require('dotenv').config();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const upload = multer({ storage: multer.memoryStorage() }); // File saved to memory
+
+// Telegram Config
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8349030448:AAEnSbQnaPKSNuDXvsfb18HaeguvFynCJOM';
+let TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 // Firebase Configuration (Extracted from your google-services.json)
 const FIREBASE_PROJECT_ID = "testingtempleteapp";
@@ -45,9 +54,39 @@ function toFirestoreFields(data) {
 }
 
 // Registration Endpoint (Using REST API to bypass Service Account requirement)
-app.post('/api/register', (req, res) => {
+app.post('/api/register', upload.single('profilePic'), async (req, res) => {
+    let profilePhotoId = "";
+
+    // If an image was uploaded, send it to Telegram Bot
+    if (req.file && TELEGRAM_CHAT_ID) {
+        try {
+            console.log("Uploading photo to Telegram...");
+            const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+            const form = new FormData();
+            form.append('chat_id', TELEGRAM_CHAT_ID);
+            form.append('photo', blob, req.file.originalname);
+
+            const telegramRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+                method: 'POST',
+                body: form
+            });
+            const telegramData = await telegramRes.json();
+            
+            if (telegramData.ok) {
+                const photos = telegramData.result.photo;
+                profilePhotoId = photos[photos.length - 1].file_id; // Get highest resolution
+                console.log(`Telegram Upload Success! file_id: ${profilePhotoId}`);
+            } else {
+                console.error("Telegram API response error:", telegramData);
+            }
+        } catch (e) {
+            console.error("Failed to post to Telegram:", e);
+        }
+    }
+
     const registrationData = {
         ...req.body,
+        profilePhotoId,
         isVerified: false,
         memberId: "",
         timestamp: Date.now()
@@ -90,8 +129,43 @@ app.post('/api/register', (req, res) => {
     request.end();
 });
 
+// Proxy endpoint to fetch the image from Telegram
+app.get('/api/photo/:file_id', async (req, res) => {
+    const { file_id } = req.params;
+    try {
+        // Step 1: Get File Path
+        const fileRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${file_id}`);
+        const fileData = await fileRes.json();
+        
+        if (!fileData.ok) {
+            return res.status(404).json({ error: 'File not found on Telegram' });
+        }
+        
+        // Step 2: Download File
+        const filePath = fileData.result.file_path;
+        const downloadUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+        
+        const photoRes = await fetch(downloadUrl);
+        if (!photoRes.ok) throw new Error("Failed to download photo");
+        
+        // Forward content type and pipe stream to client
+        res.setHeader('Content-Type', photoRes.headers.get('content-type'));
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+        
+        // Instead of loading to memory, pass the body buffer directly.
+        // ArrayBuffer converted to Node Buffer.
+        const arrayBuffer = await photoRes.arrayBuffer();
+        res.end(Buffer.from(arrayBuffer));
+
+    } catch (e) {
+        console.error("Image proxy error:", e);
+        res.status(500).json({ error: 'Failed to proxy image' });
+    }
+});
+
 // Health check route
 app.get('/', (req, res) => res.json({ status: 'Backend is running' }));
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
