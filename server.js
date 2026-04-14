@@ -13,7 +13,7 @@ const upload = multer({ storage: multer.memoryStorage() }); // File saved to mem
 
 // Telegram Config
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8349030448:AAEnSbQnaPKSNuDXvsfb18HaeguvFynCJOM';
-let TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5175497565';
 
 // Firebase Configuration (Extracted from your google-services.json)
 const FIREBASE_PROJECT_ID = "testingtempleteapp";
