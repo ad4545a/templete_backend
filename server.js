@@ -84,8 +84,26 @@ app.post('/api/register', upload.single('profilePic'), async (req, res) => {
         }
     }
 
+    const photoUrl = profilePhotoId ? `https://templete-backend.onrender.com/api/photo/${profilePhotoId}` : '';
+
     const registrationData = {
-        ...req.body,
+        title: req.body.title || '',
+        name: req.body.name || '',
+        fatherName: req.body.fatherName || '',
+        dob: req.body.dob || '',
+        dateOfBirth: req.body.dob || '',
+        category: req.body.category || '',
+        profession: req.body.profession || '',
+        firmName: req.body.firmName || '',
+        mobile: req.body.mobile || '',
+        whatsapp: req.body.whatsapp || '',
+        aadhaar: req.body.aadhaar || '',
+        state: req.body.state || '',
+        district: req.body.district || '',
+        city: req.body.city || '',
+        address: req.body.address || '',
+        pincode: req.body.pincode || '',
+        photoUrl,
         profilePhotoId,
         isVerified: false,
         memberId: "",
