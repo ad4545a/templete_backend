@@ -129,6 +129,40 @@ app.post('/api/register', upload.single('profilePic'), async (req, res) => {
     request.end();
 });
 
+// Upload endpoint for admin app to upload member photos to Telegram
+app.post('/api/upload-photo', upload.single('photo'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No photo file provided' });
+    }
+
+    try {
+        console.log("Admin upload: Uploading photo to Telegram...");
+        const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+        const form = new FormData();
+        form.append('chat_id', TELEGRAM_CHAT_ID);
+        form.append('photo', blob, req.file.originalname || 'member_photo.jpg');
+
+        const telegramRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+            method: 'POST',
+            body: form
+        });
+        const telegramData = await telegramRes.json();
+
+        if (telegramData.ok) {
+            const photos = telegramData.result.photo;
+            const fileId = photos[photos.length - 1].file_id; // Highest resolution
+            console.log(`Admin upload success! file_id: ${fileId}`);
+            res.json({ success: true, file_id: fileId });
+        } else {
+            console.error("Telegram API error:", telegramData);
+            res.status(500).json({ error: 'Telegram upload failed', details: telegramData.description });
+        }
+    } catch (e) {
+        console.error("Admin upload error:", e);
+        res.status(500).json({ error: 'Failed to upload photo' });
+    }
+});
+
 // Proxy endpoint to fetch the image from Telegram
 app.get('/api/photo/:file_id', async (req, res) => {
     const { file_id } = req.params;
