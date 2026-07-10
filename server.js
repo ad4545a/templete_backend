@@ -54,8 +54,94 @@ function toFirestoreFields(data) {
     return { fields };
 }
 
+// Helper: Check if a mobile number is already registered in members or pending in registration_requests
+async function isMobileAlreadyUsed(mobile) {
+    if (!mobile) return { exists: false };
+    
+    const cleanMobile = mobile.toString().trim();
+    if (!cleanMobile) return { exists: false };
+
+    const queryCollection = (collectionId, fieldPath, stringValue) => {
+        return new Promise((resolve, reject) => {
+            const queryBody = JSON.stringify({
+                structuredQuery: {
+                    from: [{ collectionId }],
+                    where: {
+                        fieldFilter: {
+                            field: { fieldPath },
+                            op: 'EQUAL',
+                            value: { stringValue }
+                        }
+                    },
+                    limit: 1
+                }
+            });
+
+            const options = {
+                hostname: 'firestore.googleapis.com',
+                path: `/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery?key=${FIREBASE_API_KEY}`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(queryBody)
+                }
+            };
+
+            const request = https.request(options, (response) => {
+                let body = '';
+                response.on('data', (d) => body += d);
+                response.on('end', () => {
+                    if (response.statusCode >= 200 && response.statusCode < 300) {
+                        try {
+                            const results = JSON.parse(body);
+                            const found = results.some(result => result.document && result.document.name);
+                            resolve(found);
+                        } catch (e) {
+                            console.error(`Error parsing runQuery response for ${collectionId}:`, e);
+                            resolve(false);
+                        }
+                    } else {
+                        console.error(`Firestore runQuery Error for ${collectionId}: status ${response.statusCode}`, body);
+                        resolve(false);
+                    }
+                });
+            });
+
+            request.on('error', (e) => {
+                console.error(`Network error running query for ${collectionId}:`, e);
+                resolve(false);
+            });
+
+            request.write(queryBody);
+            request.end();
+        });
+    };
+
+    const existsInMembers = await queryCollection('members', 'mobile', cleanMobile);
+    if (existsInMembers) return { exists: true, where: 'members' };
+
+    const existsInRequests = await queryCollection('registration_requests', 'mobile', cleanMobile);
+    if (existsInRequests) return { exists: true, where: 'registration_requests' };
+
+    return { exists: false };
+}
+
 // Registration Endpoint (Using REST API to bypass Service Account requirement)
 app.post('/api/register', upload.single('profilePic'), async (req, res) => {
+    const mobile = req.body.mobile || '';
+    
+    try {
+        const check = await isMobileAlreadyUsed(mobile);
+        if (check.exists) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'यह मोबाइल नंबर पहले से ही पंजीकृत है या इसका आवेदन लंबित है। (This mobile number is already registered or has a pending request.)' 
+            });
+        }
+    } catch (e) {
+        console.error("Duplicate check error:", e);
+    }
+
     let profilePhotoId = "";
 
     // If an image was uploaded, send it to Telegram Bot
