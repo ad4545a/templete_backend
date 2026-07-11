@@ -55,11 +55,11 @@ function getTimestamp(doc) {
     return tsVal ? parseInt(tsVal, 10) : 0;
 }
 
-async function startCleanup() {
-    console.log("Fetching registration requests...");
+async function cleanCollection(collection) {
+    console.log(`\nFetching ${collection}...`);
     try {
-        const docs = await fetchDocuments('registration_requests');
-        console.log(`Fetched ${docs.length} pending registration requests.`);
+        const docs = await fetchDocuments(collection);
+        console.log(`Fetched ${docs.length} documents from ${collection}.`);
 
         // Group by mobile number
         const groups = {};
@@ -82,20 +82,20 @@ async function startCleanup() {
 
         for (const [mobile, list] of Object.entries(groups)) {
             if (list.length > 1) {
-                console.log(`\nDuplicate found for mobile: ${mobile} (${list.length} requests)`);
+                console.log(`\nDuplicate found for mobile: ${mobile} (${list.length} requests/members)`);
                 // Sort list by timestamp descending (newest first)
                 list.sort((a, b) => b.timestamp - a.timestamp);
 
                 // Keep the first (newest) one
                 const keep = list[0];
-                console.log(`  [KEEP] docId: ${keep.docId}, Name: ${keep.name}, Date: ${new Date(keep.timestamp).toISOString()}`);
+                console.log(`  [KEEP] docId: ${keep.docId}, Name: ${keep.name}, Date: ${keep.timestamp ? new Date(keep.timestamp).toISOString() : 'N/A'}`);
 
                 // Delete the others
                 for (let i = 1; i < list.length; i++) {
                     const dup = list[i];
-                    console.log(`  [DELETE] docId: ${dup.docId}, Name: ${dup.name}, Date: ${new Date(dup.timestamp).toISOString()}`);
+                    console.log(`  [DELETE] docId: ${dup.docId}, Name: ${dup.name}, Date: ${dup.timestamp ? new Date(dup.timestamp).toISOString() : 'N/A'}`);
                     try {
-                        await deleteDocument('registration_requests', dup.docId);
+                        await deleteDocument(collection, dup.docId);
                         totalDeleted++;
                     } catch (err) {
                         console.error(`  Error deleting ${dup.docId}:`, err.message);
@@ -104,10 +104,57 @@ async function startCleanup() {
             }
         }
 
-        console.log(`\nCleanup finished. Deleted ${totalDeleted} duplicate request(s).`);
+        console.log(`\nCleanup of ${collection} finished. Deleted ${totalDeleted} duplicate document(s).`);
     } catch (e) {
-        console.error("Error during cleanup:", e);
+        console.error(`Error during cleanup of ${collection}:`, e);
     }
+}
+
+async function cleanPendingIfVerified() {
+    console.log("\nChecking for pending requests that are already verified members...");
+    try {
+        const pendingDocs = await fetchDocuments('registration_requests');
+        const memberDocs = await fetchDocuments('members');
+        
+        console.log(`Fetched ${pendingDocs.length} pending requests and ${memberDocs.length} verified members.`);
+        
+        const verifiedMobiles = new Set();
+        for (const doc of memberDocs) {
+            const fields = doc.fields || {};
+            const mobile = fields.mobile?.stringValue || '';
+            if (mobile) {
+                verifiedMobiles.add(mobile);
+            }
+        }
+        
+        let deletedCount = 0;
+        for (const doc of pendingDocs) {
+            const fields = doc.fields || {};
+            const mobile = fields.mobile?.stringValue || '';
+            const docId = doc.name.split('/').pop();
+            const name = fields.name?.stringValue || 'N/A';
+            
+            if (mobile && verifiedMobiles.has(mobile)) {
+                console.log(`[DELETE PENDING] docId: ${docId}, Name: ${name}, Mobile: ${mobile} (Already verified in members list)`);
+                try {
+                    await deleteDocument('registration_requests', docId);
+                    deletedCount++;
+                } catch (err) {
+                    console.error(`  Error deleting pending request ${docId}:`, err.message);
+                }
+            }
+        }
+        
+        console.log(`Finished cleaning pending requests. Deleted ${deletedCount} request(s) that were already verified.`);
+    } catch (e) {
+        console.error("Error cleaning pending verified requests:", e);
+    }
+}
+
+async function startCleanup() {
+    await cleanCollection('registration_requests');
+    await cleanCollection('members');
+    await cleanPendingIfVerified();
 }
 
 startCleanup();
